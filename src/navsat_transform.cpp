@@ -37,11 +37,11 @@
 #include <memory>
 #include <utility>
 
-#include <robot_localization/filter_common.hpp>
-#include <robot_localization/filter_utilities.hpp>
-#include <robot_localization/navsat_conversions.hpp>
-#include <robot_localization/navsat_transform.hpp>
-#include <robot_localization/ros_filter_utilities.hpp>
+#include <bagrob_robot_localization/filter_common.hpp>
+#include <bagrob_robot_localization/filter_utilities.hpp>
+#include <bagrob_robot_localization/navsat_conversions.hpp>
+#include <bagrob_robot_localization/navsat_transform.hpp>
+#include <bagrob_robot_localization/ros_filter_utilities.hpp>
 
 #include <GeographicLib/Geocentric.hpp>
 #include <GeographicLib/LocalCartesian.hpp>
@@ -137,12 +137,12 @@ NavSatTransform::NavSatTransform(const rclcpp::NodeOptions & options)
   parameters_callback_handle_ = this->add_on_set_parameters_callback(
     std::bind(&NavSatTransform::parametersCallback, this, std::placeholders::_1));
 
-  datum_srv_ = this->create_service<robot_localization::srv::SetDatum>(
+  datum_srv_ = this->create_service<bagrob_robot_localization::srv::SetDatum>(
     "datum", std::bind(&NavSatTransform::datumCallback, this, _1, _2));
 
-  to_ll_srv_ = this->create_service<robot_localization::srv::ToLL>(
+  to_ll_srv_ = this->create_service<bagrob_robot_localization::srv::ToLL>(
     "toLL", std::bind(&NavSatTransform::toLLCallback, this, _1, _2));
-  from_ll_srv_ = this->create_service<robot_localization::srv::FromLL>(
+  from_ll_srv_ = this->create_service<bagrob_robot_localization::srv::FromLL>(
     "fromLL", std::bind(&NavSatTransform::fromLLCallback, this, _1, _2));
 
   std::vector<double> datum_vals;
@@ -159,14 +159,14 @@ NavSatTransform::NavSatTransform(const rclcpp::NodeOptions & options)
       datum_yaw = datum_vals[2];
     }
 
-    auto request = std::make_shared<robot_localization::srv::SetDatum::Request>();
+    auto request = std::make_shared<bagrob_robot_localization::srv::SetDatum::Request>();
     request->geo_pose.position.latitude = datum_lat;
     request->geo_pose.position.longitude = datum_lon;
     request->geo_pose.position.altitude = 0.0;
     tf2::Quaternion quat;
     quat.setRPY(0.0, 0.0, datum_yaw);
     request->geo_pose.orientation = tf2::toMsg(quat);
-    auto response = std::make_shared<robot_localization::srv::SetDatum::Response>();
+    auto response = std::make_shared<bagrob_robot_localization::srv::SetDatum::Response>();
     datumCallback(request, response);
   }
 
@@ -355,8 +355,8 @@ void NavSatTransform::computeTransform()
 }
 
 bool NavSatTransform::datumCallback(
-  robot_localization::srv::SetDatum::Request::SharedPtr request,
-  robot_localization::srv::SetDatum::Response::SharedPtr)
+  bagrob_robot_localization::srv::SetDatum::Request::SharedPtr request,
+  bagrob_robot_localization::srv::SetDatum::Response::SharedPtr)
 {
   // store manual data geopose until the transform can be computed.
   manual_datum_geopose_ = request->geo_pose;
@@ -409,8 +409,8 @@ void NavSatTransform::setManualDatum()
 }
 
 bool NavSatTransform::toLLCallback(
-  const std::shared_ptr<robot_localization::srv::ToLL::Request> request,
-  std::shared_ptr<robot_localization::srv::ToLL::Response> response)
+  const std::shared_ptr<bagrob_robot_localization::srv::ToLL::Request> request,
+  std::shared_ptr<bagrob_robot_localization::srv::ToLL::Response> response)
 {
   if (!transform_good_) {
     return false;
@@ -427,8 +427,8 @@ bool NavSatTransform::toLLCallback(
 }
 
 bool NavSatTransform::fromLLCallback(
-  const std::shared_ptr<robot_localization::srv::FromLL::Request> request,
-  std::shared_ptr<robot_localization::srv::FromLL::Response> response)
+  const std::shared_ptr<bagrob_robot_localization::srv::FromLL::Request> request,
+  std::shared_ptr<bagrob_robot_localization::srv::FromLL::Response> response)
 {
   double altitude = request->ll_point.altitude;
   double longitude = request->ll_point.longitude;

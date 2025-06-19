@@ -34,8 +34,8 @@
 #include <Eigen/Dense>
 #include <angles/angles.h>
 #include <vector>
-#include <robot_localization/ekf.hpp>
-#include <robot_localization/filter_common.hpp>
+#include <bagrob_robot_localization/ekf.hpp>
+#include <bagrob_robot_localization/filter_common.hpp>
 #include <rclcpp/duration.hpp>
 
 namespace robot_localization
