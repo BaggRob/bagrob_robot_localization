@@ -68,6 +68,8 @@
 #include <bagrob_robot_localization/filter_base.hpp>
 #include <bagrob_robot_localization/filter_common.hpp>
 #include <bagrob_robot_localization/ros_filter_utilities.hpp>
+#include <bagrob_interfaces/srv/send_command.hpp>
+#include <bagrob_interfaces/commands.h>
 
 namespace robot_localization
 {
@@ -306,6 +308,15 @@ public:
     const std::shared_ptr<std_srvs::srv::Empty::Request>,
     const std::shared_ptr<std_srvs::srv::Empty::Response>);
 
+  //! @brief Service callback for sending commands to the filter
+  //! @param[in] request - Custom service request with command information
+  //! @param[out] response - Custom service response with command status
+  //! @return boolean true if successful, false if not
+  bool sendCommandSrvCallback(
+    const std::shared_ptr<rmw_request_id_t> request_header,
+    const std::shared_ptr<bagrob_interfaces::srv::SendCommand::Request> request,
+    std::shared_ptr<bagrob_interfaces::srv::SendCommand::Response> response);
+
   //! @brief Callback method for receiving all twist messages
   //! @param[in] msg - The ROS stamped twist with covariance message to take in.
   //! @param[in] callback_data - Relevant static callback data
@@ -321,6 +332,22 @@ public:
   //! @return true if the filter output is valid, false otherwise
   //!
   bool validateFilterOutput(nav_msgs::msg::Odometry * message);
+
+  //! @brief Toggles the IMU processing on or off
+  //!
+  bool toggleImu();
+
+  //! @brief Toggles the Encoder processing on or off
+  //!
+  bool toggleEncoder();
+
+  //! @brief Toggles the Bluetooth Low Energy (BLE) processing on or off
+  //!
+  bool toggleBle();
+
+  //! @brief Toggles the Visual Odometry processing on or off
+  //!
+  bool toggleVisualOdometry();
 
 protected:
   //! @brief Finds the latest filter state before the given timestamp and makes
@@ -754,6 +781,10 @@ protected:
   //!
   rclcpp::Service<std_srvs::srv::Empty>::SharedPtr enable_filter_srv_;
 
+  //! @brief Service that allows another node to send commands to the filter.
+  //! Uses a custom SendCommand service.
+  rclcpp::Service<bagrob_interfaces::srv::SendCommand>::SharedPtr send_command_srv_;
+
   //! @brief Transform buffer for managing coordinate transforms
   //!
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
@@ -800,6 +831,18 @@ protected:
   //! Must be on heap since pointer is passed to diagnostic_updater::FrequencyStatusParam
   //!
   double max_frequency_;
+
+  bool imu_enabled_ = true;
+  bool encoder_enabled_ = true;
+  bool ble_enabled_ = true;
+  bool visual_odometry_enabled_ = true;
+
+  std::vector<std::tuple<std::string, std::string, int, std::tuple<CallbackData, CallbackData>>> odom_callback_data_;
+  std::vector<std::tuple<std::string, std::string, int, CallbackData>> pose_callback_data_;
+  std::vector<std::tuple<std::string, std::string, int, CallbackData>> twist_callback_data_;
+  std::vector<std::tuple<std::string, std::string, int, std::tuple<CallbackData, CallbackData, CallbackData>>> imu_callback_data_;
+
+  std::vector<double> avg_gravity_;
 };
 
 }  // namespace robot_localization

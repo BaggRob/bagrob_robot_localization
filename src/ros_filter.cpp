@@ -40,7 +40,7 @@
 #include <utility>
 #include <memory>
 #include <vector>
-
+#include <math.h>
 #include <bagrob_robot_localization/ekf.hpp>
 #include <bagrob_robot_localization/filter_utilities.hpp>
 #include <bagrob_robot_localization/ros_filter.hpp>
@@ -75,7 +75,7 @@ RosFilter<T>::RosFilter(const rclcpp::NodeOptions & options)
   dynamic_diag_error_level_(diagnostic_msgs::msg::DiagnosticStatus::OK),
   static_diag_error_level_(diagnostic_msgs::msg::DiagnosticStatus::OK),
   frequency_(30.0),
-  gravitational_acceleration_(9.80665),
+  gravitational_acceleration_(9.748),
   history_length_(0ns),
   latest_control_(),
   last_diag_time_(0, 0, RCL_ROS_TIME),
@@ -104,6 +104,12 @@ RosFilter<T>::RosFilter(const rclcpp::NodeOptions & options)
   state_variable_names_.push_back("X_ACCELERATION");
   state_variable_names_.push_back("Y_ACCELERATION");
   state_variable_names_.push_back("Z_ACCELERATION");
+
+  send_command_srv_ = this->create_service<bagrob_interfaces::srv::SendCommand>(
+    "/send_command",
+    std::bind(
+      &RosFilter<T>::sendCommandSrvCallback, this,
+      std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 }
 
 template<typename T>
@@ -1156,6 +1162,9 @@ void RosFilter<T>::loadParams()
           std::placeholders::_1, odom_topic_name,
           pose_callback_data, twist_callback_data);
 
+        // Store the callback data for later use
+        odom_callback_data_.push_back(std::make_tuple(odom_topic_name, odom_topic, queue_size, std::make_tuple(pose_callback_data, twist_callback_data)));
+
         auto custom_qos = rclcpp::SensorDataQoS(rclcpp::KeepLast(queue_size));
         topic_subs_.push_back(
           this->create_subscription<nav_msgs::msg::Odometry>(
@@ -1285,6 +1294,9 @@ void RosFilter<T>::loadParams()
           pose_update_sum, differential,
           relative, pose_mahalanobis_thresh);
 
+        // Keep callback data to be able to reinitialize subscriber
+        pose_callback_data_.push_back(std::make_tuple(pose_topic_name, pose_topic, queue_size, callback_data));
+
         std::function<void(const std::shared_ptr<
             geometry_msgs::msg::PoseWithCovarianceStamped>)>
         pose_callback =
@@ -1380,6 +1392,9 @@ void RosFilter<T>::loadParams()
         const CallbackData callback_data(twist_topic_name, twist_update_vec,
           twist_update_sum, false, false,
           twist_mahalanobis_thresh);
+
+        // Keep callback data to be able to reinitialize subscriber
+        twist_callback_data_.push_back(std::make_tuple(twist_topic_name,twist_topic, queue_size, callback_data));
 
         std::function<void(const std::shared_ptr<
             geometry_msgs::msg::TwistWithCovarianceStamped>)>
@@ -1588,6 +1603,9 @@ void RosFilter<T>::loadParams()
         const CallbackData accel_callback_data(
           imu_topic_name + "_acceleration", accel_update_vec, accelUpdateSum,
           differential, relative, accel_mahalanobis_thresh);
+
+        // Keep callback data to be able to reinitialize subscriber
+        imu_callback_data_.push_back(std::make_tuple(imu_topic_name, imu_topic, queue_size, std::make_tuple(pose_callback_data, twist_callback_data, accel_callback_data)));
 
         std::function<void(const std::shared_ptr<sensor_msgs::msg::Imu>)>
         imu_callback =
@@ -2282,6 +2300,50 @@ bool RosFilter<T>::enableFilterSrvCallback(
 }
 
 template<typename T>
+bool RosFilter<T>::sendCommandSrvCallback(
+  const std::shared_ptr<rmw_request_id_t>/*request_header*/,
+  const std::shared_ptr<bagrob_interfaces::srv::SendCommand::Request> request,
+  std::shared_ptr<bagrob_interfaces::srv::SendCommand::Response> response)
+{
+  RF_DEBUG(
+    "\n[" << this->get_name() << ":]" <<
+      " ------ /RosFilter::sendCommandSrvCallback ------\n");
+
+  bool status = false;
+  switch (request->command) {
+    case Commands::RESET:
+      RF_DEBUG("Resetting filter");
+      reset();
+      break;
+    case Commands::TOGGLE_SENSOR:
+      switch (request->int_params[0]) {
+        case Sensors::Imu:
+          RF_DEBUG("Toggling IMU sensor");
+          status = toggleImu();
+          break;
+        case Sensors::Encoder:
+          RF_DEBUG("Toggling encoder sensors");
+          status = toggleEncoder();
+          break;
+        case Sensors::Ble:
+          RF_DEBUG("Toggling Bluetooth sensor");
+          status = toggleBle();
+          break;
+        case Sensors::Visual_odometry:
+          RF_DEBUG("Toggling visual odometry sensor");
+          status = toggleVisualOdometry();
+          break;
+        default:
+          RCLCPP_ERROR(
+            this->get_logger(), "Unknown sensor type %d", request->int_params[0]);
+      }
+      break;
+  }
+    response->success = status;
+  return true;
+}
+
+template<typename T>
 void RosFilter<T>::twistCallback(
   const geometry_msgs::msg::TwistWithCovarianceStamped::SharedPtr msg,
   const CallbackData & callback_data, const std::string & target_frame)
@@ -2544,7 +2606,13 @@ bool RosFilter<T>::prepareAcceleration(
   // 1. Get the measurement into a vector
   tf2::Vector3 acc_tmp(msg->linear_acceleration.x, msg->linear_acceleration.y,
     msg->linear_acceleration.z);
-
+  /*
+  avg_gravity_.push_back(std::sqrt(pow(acc_tmp.x(),2) + pow(acc_tmp.y(),2) + pow(acc_tmp.z(),2)));
+  float gravitational_acceleration = std::accumulate(
+    avg_gravity_.begin(), avg_gravity_.end(), 0.0) / avg_gravity_.size();
+  RCLCPP_INFO(this->get_logger(),
+              "Gravitational acceleration is %f m/s^2", gravitational_acceleration);
+*/
   // Set relevant header info
   std::string msg_frame =
     (msg->header.frame_id == "" ? base_link_frame_id_ : msg->header.frame_id);
@@ -3465,6 +3533,145 @@ void RosFilter<T>::clearMeasurementQueue()
     measurement_queue_.pop();
   }
 }
+
+template<typename T>
+bool RosFilter<T>::toggleImu()
+{
+    if (imu_enabled_)
+    {
+        this->topic_subs_[Sensors::Imu].reset();
+        RCLCPP_INFO(this->get_logger(), "Imu disabled.");
+        imu_enabled_ = false;
+    }
+    else
+    {
+        std::string imu_topic_name = std::get<0>(imu_callback_data_[0]);
+        std::string imu_topic = std::get<1>(imu_callback_data_[0]);
+        int queue_size = std::get<2>(imu_callback_data_[0]);
+        // Create a callback function that will call the imuCallback method
+        // with the appropriate parameters.
+        auto temp_pose_callback_data = std::get<0>(std::get<3>(imu_callback_data_[0]));
+        auto temp_twist_callback_data = std::get<1>(std::get<3>(imu_callback_data_[0]));
+        auto temp_accel_callback_data = std::get<2>(std::get<3>(imu_callback_data_[0]));
+
+        std::function<void(const std::shared_ptr<sensor_msgs::msg::Imu>)>
+            imu_callback =
+            std::bind(
+                &RosFilter<T>::imuCallback, this, std::placeholders::_1,
+                imu_topic_name, temp_pose_callback_data,
+                temp_twist_callback_data, temp_accel_callback_data);
+
+        auto custom_qos = rclcpp::SensorDataQoS(rclcpp::KeepLast(queue_size));
+        topic_subs_[Sensors::Imu] = this->create_subscription<sensor_msgs::msg::Imu>(imu_topic, custom_qos, imu_callback);
+
+        RCLCPP_INFO(this->get_logger(), "Imu enabled. Subscriber created for topic %s.",
+                    imu_topic.c_str());
+        imu_enabled_ = true;
+
+    }
+    return imu_enabled_;
+}
+
+template<typename T>
+bool RosFilter<T>::toggleEncoder()
+{
+    if (encoder_enabled_)
+    {
+        this->topic_subs_[Sensors::Encoder].reset();
+        RCLCPP_INFO(this->get_logger(), "Encoder disabled.");
+        encoder_enabled_ = false;
+    }
+    else
+    {
+        std::string encoder_topic_name = std::get<0>(odom_callback_data_[0]);
+        std::string encoder_topic = std::get<1>(odom_callback_data_[0]);
+        int queue_size = std::get<2>(odom_callback_data_[0]);
+
+        auto pose_callback_data = std::get<0>(std::get<3>(odom_callback_data_[0]));
+        auto twist_callback_data = std::get<1>(std::get<3>(odom_callback_data_[0]));
+
+        std::function<void(const std::shared_ptr<nav_msgs::msg::Odometry>)>
+            odom_callback = std::bind(
+                &RosFilter<T>::odometryCallback, this,
+                std::placeholders::_1, encoder_topic_name,
+                pose_callback_data, twist_callback_data);
+
+        auto custom_qos = rclcpp::SensorDataQoS(rclcpp::KeepLast(queue_size));
+        topic_subs_[Sensors::Encoder] = this->create_subscription<nav_msgs::msg::Odometry>(encoder_topic, custom_qos, odom_callback);
+        RCLCPP_INFO(this->get_logger(), "Encoder enabled. Subscriber created for topic %s.",
+                    encoder_topic.c_str());
+        encoder_enabled_ = true;
+    }
+    return encoder_enabled_;
+}
+
+template<typename T>
+bool RosFilter<T>::toggleVisualOdometry()
+{
+    if (visual_odometry_enabled_)
+    {
+        this->topic_subs_[Sensors::Visual_odometry].reset();
+        RCLCPP_INFO(this->get_logger(), "Visual odometry disabled.");
+        visual_odometry_enabled_ = false;
+    }
+    else
+    {
+        std::string encoder_topic_name = std::get<0>(odom_callback_data_[0]);
+        std::string encoder_topic = std::get<1>(odom_callback_data_[0]);
+        int queue_size = std::get<2>(odom_callback_data_[0]);
+
+        auto pose_callback_data = std::get<0>(std::get<3>(odom_callback_data_[0]));
+        auto twist_callback_data = std::get<1>(std::get<3>(odom_callback_data_[0]));
+
+        std::function<void(const std::shared_ptr<nav_msgs::msg::Odometry>)>
+            odom_callback = std::bind(
+                &RosFilter<T>::odometryCallback, this,
+                std::placeholders::_1, encoder_topic_name,
+                pose_callback_data, twist_callback_data);
+
+        auto custom_qos = rclcpp::SensorDataQoS(rclcpp::KeepLast(queue_size));
+        topic_subs_[Sensors::Visual_odometry] = this->create_subscription<nav_msgs::msg::Odometry>(encoder_topic, custom_qos, odom_callback);
+        RCLCPP_INFO(this->get_logger(), "Visual odometry enabled. Subscriber created for topic %s.",
+                    encoder_topic.c_str());
+        visual_odometry_enabled_ = true;
+    }
+    return visual_odometry_enabled_;
+}
+
+template<typename T>
+bool RosFilter<T>::toggleBle()
+{
+    if (ble_enabled_)
+    {
+        this->topic_subs_[Sensors::Ble].reset();
+        RCLCPP_INFO(this->get_logger(), "BLE disabled.");
+        ble_enabled_ = false;
+    }
+    else
+    {
+        std::string ble_topic_name = std::get<0>(pose_callback_data_[0]);
+        std::string ble_topic = std::get<1>(pose_callback_data_[0]);
+        int queue_size = std::get<2>(pose_callback_data_[0]);
+
+        auto pose_callback_data = std::get<3>(pose_callback_data_[0]);
+
+        std::function<void(const std::shared_ptr<
+                           geometry_msgs::msg::PoseWithCovarianceStamped>)>
+            pose_callback =
+            std::bind(
+                &RosFilter<T>::poseCallback, this, std::placeholders::_1,
+                pose_callback_data, world_frame_id_, false);
+
+        auto custom_qos = rclcpp::SensorDataQoS(rclcpp::KeepLast(queue_size));
+
+        topic_subs_[Sensors::Ble] =this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(ble_topic, custom_qos, pose_callback);
+        RCLCPP_INFO(this->get_logger(), "BLE enabled. Subscriber created for topic %s.",
+                    ble_topic.c_str());
+        ble_enabled_ = true;
+    }
+    return ble_enabled_;
+}
+
 }  // namespace robot_localization
 
 template class robot_localization::RosFilter<robot_localization::Ekf>;
