@@ -28,9 +28,9 @@ def generate_launch_description():
         launch_ros.actions.Node(
             package='bagrob_robot_localization',
             executable='ekf_node',
-            name='bagrob_ekf_filter_node_1',
+            name='bagrob_ekf_filter_node_2',
             output='screen',
-            parameters=[os.path.join(get_package_share_directory("bagrob_robot_localization"), 'params', 'bagrob_ekf_zed.yaml')],
+            parameters=[os.path.join(get_package_share_directory("bagrob_robot_localization"), 'params', 'bagrob_ekf_map_zed.yaml')],
             remappings=[('/send_command', '/bagrob_ekf_filter_node_1/send_command')]
             ),
 ])
