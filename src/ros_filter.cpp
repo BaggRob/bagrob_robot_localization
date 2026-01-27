@@ -106,9 +106,9 @@ RosFilter<T>::RosFilter(const rclcpp::NodeOptions & options)
   state_variable_names_.push_back("Z_ACCELERATION");
 
   send_command_srv_ = this->create_service<bagrob_interfaces::srv::SendCommand>(
-    "/send_command",
+    "robot_localization/send_command",
     std::bind(
-      &RosFilter<T>::sendCommandSrvCallback, this,
+      &RosFilter<T>::CommandCallback, this,
       std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
 }
 
@@ -2300,7 +2300,7 @@ bool RosFilter<T>::enableFilterSrvCallback(
 }
 
 template<typename T>
-bool RosFilter<T>::sendCommandSrvCallback(
+bool RosFilter<T>::CommandCallback(
   const std::shared_ptr<rmw_request_id_t>/*request_header*/,
   const std::shared_ptr<bagrob_interfaces::srv::SendCommand::Request> request,
   std::shared_ptr<bagrob_interfaces::srv::SendCommand::Response> response)
@@ -2310,13 +2310,13 @@ bool RosFilter<T>::sendCommandSrvCallback(
       " ------ /RosFilter::sendCommandSrvCallback ------\n");
 
   bool status = false;
-  switch (request->command) {
+  switch (static_cast<Commands>(request->command)) {
     case Commands::RESET:
       RF_DEBUG("Resetting filter");
       reset();
       break;
     case Commands::TOGGLE_SENSOR:
-      switch (request->int_params[0]) {
+      switch (static_cast<Sensors>(request->int_params[0])) {
         case Sensors::Imu:
           RF_DEBUG("Toggling IMU sensor");
           status = toggleImu();

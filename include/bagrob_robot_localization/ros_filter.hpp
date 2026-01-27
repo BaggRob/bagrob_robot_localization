@@ -312,7 +312,7 @@ public:
   //! @param[in] request - Custom service request with command information
   //! @param[out] response - Custom service response with command status
   //! @return boolean true if successful, false if not
-  bool sendCommandSrvCallback(
+  bool CommandCallback(
     const std::shared_ptr<rmw_request_id_t> request_header,
     const std::shared_ptr<bagrob_interfaces::srv::SendCommand::Request> request,
     std::shared_ptr<bagrob_interfaces::srv::SendCommand::Response> response);

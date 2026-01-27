@@ -31,6 +31,6 @@ def generate_launch_description():
             name='bagrob_ekf_filter_node_2',
             output='screen',
             parameters=[os.path.join(get_package_share_directory("bagrob_robot_localization"), 'params', 'bagrob_ekf_map_zed.yaml')],
-            remappings=[('/send_command', '/bagrob_ekf_filter_node_1/send_command')]
+            remappings=[('/robot_localization/send_command', '/bagrob_ekf_filter_node_2/send_command')]
             ),
 ])
